@@ -1,0 +1,50 @@
+#!~/.git-checkpoint/.venv/bin/python
+import argparse
+import pygit2
+from pathlib import Path
+from pygit2.enums import CheckoutStrategy
+
+def find_stash_index(repo, oid):
+    for i, stash in enumerate(repo.listall_stashes()):
+        if stash.commit_id == oid:
+            return i
+    return None
+
+def handle(command: str):
+    repo = pygit2.Repository(".")
+    checkpoint_file = Path(repo.path) / "CHECKPOINT"
+    if command in ("quicksave","save","set",None):
+        ref = repo.stash(repo.default_signature, "quicksave", keep_all=True, include_untracked=True)
+        checkpoint_file.write_text(str(ref))
+    elif command in ("reload", "restore", "reset", "load"):
+        if not checkpoint_file.is_file():
+            print("no checkpoint found")
+            return
+
+        oid = pygit2.Oid(hex=checkpoint_file.read_text().strip())
+        idx = find_stash_index(repo, oid)
+        if idx is None:
+            print(f"checkpoint {oid} no longer in stash list")
+            return
+
+        repo.stash_apply(idx, strategy=CheckoutStrategy.FORCE)
+        print(f"checkpoint restored: {oid}")
+    elif command == 'clean':
+        stashes_to_be_cleaned = []
+        for i, stash in enumerate(repo.listall_stashes()):
+            if "quicksave" in stash.message:
+                stashes_to_be_cleaned.append(i)
+        for i in stashes_to_be_cleaned[::-1]:
+            repo.stash_drop(i)
+    else:
+        print("not a valid subcommand")
+
+parser = argparse.ArgumentParser(
+        prog="git checkpoint",
+        description="quicksave for git"
+        )
+parser.add_argument("command", nargs="?", default=None)
+
+args = parser.parse_args()
+
+handle(args.command)
